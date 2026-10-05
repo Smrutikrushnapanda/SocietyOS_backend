@@ -1,0 +1,48 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AUDIT_ENTITY_TYPES = exports.AUDIT_ACTIONS = exports.AuditEntityType = exports.AuditAction = void 0;
+var AuditAction;
+(function (AuditAction) {
+    AuditAction["CREATE"] = "CREATE";
+    AuditAction["UPDATE"] = "UPDATE";
+    AuditAction["DELETE"] = "DELETE";
+    AuditAction["CANCEL"] = "CANCEL";
+    AuditAction["REJECT"] = "REJECT";
+    AuditAction["REVOKE"] = "REVOKE";
+    AuditAction["ASSIGN"] = "ASSIGN";
+    AuditAction["RESOLVE"] = "RESOLVE";
+    AuditAction["PUBLISH"] = "PUBLISH";
+    AuditAction["EXPIRE"] = "EXPIRE";
+    AuditAction["ARCHIVE"] = "ARCHIVE";
+    AuditAction["START"] = "START";
+    AuditAction["END"] = "END";
+    AuditAction["VOTE"] = "VOTE";
+    AuditAction["GENERATE"] = "GENERATE";
+    AuditAction["MARK_PAID"] = "MARK_PAID";
+    AuditAction["MARK_OVERDUE"] = "MARK_OVERDUE";
+    AuditAction["WAIVE_LATE_CHARGE"] = "WAIVE_LATE_CHARGE";
+    AuditAction["MARK_COMPLETED"] = "MARK_COMPLETED";
+    AuditAction["MARK_FAILED"] = "MARK_FAILED";
+    AuditAction["UPLOAD"] = "UPLOAD";
+})(AuditAction || (exports.AuditAction = AuditAction = {}));
+var AuditEntityType;
+(function (AuditEntityType) {
+    AuditEntityType["BUILDING"] = "BUILDING";
+    AuditEntityType["FLOOR"] = "FLOOR";
+    AuditEntityType["FLAT"] = "FLAT";
+    AuditEntityType["RESIDENT"] = "RESIDENT";
+    AuditEntityType["VISITOR"] = "VISITOR";
+    AuditEntityType["VISITOR_VISIT"] = "VISITOR_VISIT";
+    AuditEntityType["VISITOR_APPROVAL"] = "VISITOR_APPROVAL";
+    AuditEntityType["VISITOR_PASS"] = "VISITOR_PASS";
+    AuditEntityType["MAINTENANCE_CONFIGURATION"] = "MAINTENANCE_CONFIGURATION";
+    AuditEntityType["MAINTENANCE_DUE"] = "MAINTENANCE_DUE";
+    AuditEntityType["PAYMENT"] = "PAYMENT";
+    AuditEntityType["COMPLAINT"] = "COMPLAINT";
+    AuditEntityType["NOTICE"] = "NOTICE";
+    AuditEntityType["POLL"] = "POLL";
+    AuditEntityType["FILE"] = "FILE";
+})(AuditEntityType || (exports.AuditEntityType = AuditEntityType = {}));
+exports.AUDIT_ACTIONS = Object.values(AuditAction);
+exports.AUDIT_ENTITY_TYPES = Object.values(AuditEntityType);
+//# sourceMappingURL=audit.enums.js.map

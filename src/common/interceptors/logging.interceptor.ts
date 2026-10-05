@@ -1,0 +1,34 @@
+import {
+  Injectable,
+  NestInterceptor,
+  ExecutionContext,
+  CallHandler,
+  Logger,
+} from '@nestjs/common';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+
+@Injectable()
+export class LoggingInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(LoggingInterceptor.name);
+
+  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    const request = context.switchToHttp().getRequest();
+    const now = Date.now();
+
+    return next.handle().pipe(
+      map((data) => {
+        const response = context.switchToHttp().getResponse();
+        const status = response.statusCode;
+        const ms = Date.now() - now;
+
+        this.logger.log(`${request.method} ${request.url} ${status} ${ms}ms`, {
+          ip: request.ip,
+          userAgent: request.get('User-Agent'),
+        });
+
+        return data;
+      }),
+    );
+  }
+}
