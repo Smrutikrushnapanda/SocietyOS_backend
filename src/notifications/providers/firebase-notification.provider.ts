@@ -7,6 +7,15 @@ import {
 // firebase-admin v14 uses the modular API — no compat default export
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import {
+  fcmDispatchGuard,
+  FcmDispatchBlockedError,
+} from '../fcm-dispatch.guard';
+import {
+  classifyProviderError,
+  DeliveryError,
+  type TokenDeliveryResult,
+} from '../delivery/delivery.policy';
 
 @Injectable()
 export class FirebaseNotificationProvider
@@ -16,6 +25,7 @@ export class FirebaseNotificationProvider
   private messaging: ReturnType<typeof getMessaging> | null = null;
 
   onModuleInit() {
+    if (!fcmDispatchGuard.isEnabled()) return;
     const projectId = process.env.FIREBASE_PROJECT_ID;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
     const rawKey = process.env.FIREBASE_PRIVATE_KEY;
@@ -40,52 +50,80 @@ export class FirebaseNotificationProvider
 
       this.messaging = getMessaging(app);
       this.logger.log('Firebase Admin initialized (v14 modular API).');
-    } catch (err) {
+    } catch {
       this.logger.error(
-        'Firebase Admin initialization failed:',
-        (err as Error).message,
+        'Firebase Admin initialization failed; configuration unavailable',
       );
     }
+  }
+
+  assertDispatchAllowed(): void {
+    fcmDispatchGuard.assertAllowed();
   }
 
   async sendToTokens(
     tokens: string[],
     payload: NotificationPayload,
   ): Promise<SendResult> {
-    if (!this.messaging || tokens.length === 0) {
-      return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
+    this.assertDispatchAllowed();
+    const messaging = this.messaging;
+    if (!messaging || tokens.length === 0) {
+      return {
+        successCount: 0,
+        failureCount: tokens.length,
+        invalidTokens: [],
+        tokenResults: tokens.map(() => ({
+          status: 'retryable',
+          error: DeliveryError.CONFIGURATION,
+        })),
+      };
     }
 
     const message = {
       tokens,
-      notification: { title: payload.title, body: payload.body },
+      ...(payload.dataOnly
+        ? {}
+        : { notification: { title: payload.title, body: payload.body } }),
       data: payload.data ?? {},
+      ...(!payload.dataOnly && payload.data?.category === 'POLL' ? {
+        android: { priority: 'high' as const, notification: { channelId: 'society-polls', icon: 'ic_notification', color: '#205c4a' } },
+      } : {}),
     };
 
     try {
-      const response = await this.messaging.sendEachForMulticast(message);
+      const response = await fcmDispatchGuard.run(() =>
+        messaging.sendEachForMulticast(message),
+      );
       const invalidTokens: string[] = [];
 
-      response.responses.forEach((r: any, idx: number) => {
-        if (!r.success) {
-          const code = r.error?.code ?? '';
-          if (
-            code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token'
-          ) {
-            invalidTokens.push(tokens[idx]);
-          }
-        }
-      });
+      const tokenResults: TokenDeliveryResult[] = response.responses.map(
+        (result, index) => {
+          if (result.success) return { status: 'accepted', error: null };
+          const outcome = classifyProviderError(result.error);
+          if (outcome.error === DeliveryError.INVALID_TOKEN)
+            invalidTokens.push(tokens[index]);
+          return outcome;
+        },
+      );
 
       return {
         successCount: response.successCount,
         failureCount: response.failureCount,
         invalidTokens,
+        tokenResults,
       };
-    } catch (err) {
-      this.logger.error('FCM send failed', (err as Error).message);
-      return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
+    } catch (error: unknown) {
+      if (error instanceof FcmDispatchBlockedError) throw error;
+      const outcome = classifyProviderError(error);
+      this.logger.error('FCM request failed', {
+        classification: outcome.error,
+      });
+      return {
+        successCount: 0,
+        failureCount: tokens.length,
+        invalidTokens: [],
+        tokenResults: tokens.map(() => outcome),
+      };
     }
   }
 }

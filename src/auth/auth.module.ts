@@ -7,12 +7,17 @@ import { MockOTPProvider } from '../auth/providers/MockOTPProvider';
 import { DatabaseModule } from '../database/database.module';
 import { forwardRef } from '@nestjs/common';
 
+import { AuthorizationModule } from '../authorization/authorization.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+
 const OTP_PROVIDER_TOKEN = 'OTP_PROVIDER';
 
 @Global()
 @Module({
   imports: [
     forwardRef(() => DatabaseModule),
+    forwardRef(() => AuthorizationModule),
+    forwardRef(() => WhatsAppModule),
     JwtModule.register({}),
   ],
   providers: [

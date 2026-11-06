@@ -45,6 +45,7 @@ export enum AuditEntityType {
   NOTICE = 'NOTICE',
   POLL = 'POLL',
   FILE = 'FILE',
+  DOCUMENT_FOLDER = 'DOCUMENT_FOLDER',
 }
 
 export const AUDIT_ACTIONS: AuditAction[] = Object.values(AuditAction);

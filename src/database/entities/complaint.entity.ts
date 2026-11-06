@@ -1,10 +1,10 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
 import { Resident } from './resident.entity';
 import { Flat } from './flat.entity';
 
-@Entity()
+@Entity('complaint')
 export class Complaint {
   @PrimaryColumn('uuid')
   id: string;
@@ -52,14 +52,18 @@ export class Complaint {
   updated_at: Date;
 
   @ManyToOne(() => Organization)
+  @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 
   @ManyToOne(() => Resident)
+  @JoinColumn({ name: 'resident_id' })
   resident: Resident;
 
   @ManyToOne(() => Flat)
+  @JoinColumn({ name: 'flat_id' })
   flat: Flat;
 
   @ManyToOne(() => User)
+  @JoinColumn({ name: 'assigned_to' })
   assignedToUser: User;
 }

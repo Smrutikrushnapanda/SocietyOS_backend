@@ -1,7 +1,7 @@
 import { Entity, PrimaryColumn, Column, OneToMany } from 'typeorm';
 import { UserRole } from './user-role.entity';
 
-@Entity()
+@Entity('users')
 export class User {
   @PrimaryColumn('uuid')
   id: string;
@@ -14,6 +14,9 @@ export class User {
 
   @Column({ name: 'refreshtokenid', length: 255, nullable: true })
   refreshTokenId: string;
+
+  @Column({ type: 'varchar', name: 'password_hash', length: 255, nullable: true })
+  passwordHash: string | null;
 
   @Column({
     name: 'lastloginat',

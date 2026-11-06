@@ -1,8 +1,8 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, OneToMany } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import { Building } from './building.entity';
 import { Flat } from './flat.entity';
 
-@Entity()
+@Entity('floors')
 export class Floor {
   @PrimaryColumn('uuid')
   id: string;
@@ -19,22 +19,25 @@ export class Floor {
   @Column({ length: 255, nullable: true })
   name: string;
 
-  @Column({ default: true })
+  @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
   @Column({
+    name: 'created_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   createdAt: Date;
 
   @Column({
+    name: 'updated_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   updatedAt: Date;
 
   @ManyToOne(() => Building, (building) => building.floors)
+  @JoinColumn({ name: 'building_id' })
   building: Building;
 
   @OneToMany(() => Flat, (flat) => flat.floor)

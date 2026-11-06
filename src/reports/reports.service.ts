@@ -136,7 +136,7 @@ export class ReportsService {
       .getRepository(Flat)
       .createQueryBuilder('flat')
       .select('flat.building_id', 'building_id')
-      .addSelect('COUNT(flat.id)', 'total_flats')
+      .addSelect('COUNT(DISTINCT flat.id)', 'total_flats')
       .addSelect('COUNT(DISTINCT occupied.flat_id)', 'occupied_flats')
       .leftJoin(
         Resident,
@@ -1106,6 +1106,13 @@ export class ReportsService {
     if (Number.isNaN(parsed.getTime())) {
       throw new BadRequestException(`Invalid ${field} filter`);
     }
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+      parsed.toISOString().slice(0, 10) !== value
+    ) {
+      throw new BadRequestException(`Invalid ${field} filter`);
+    }
+    if (field === 'to' && /^\d{4}-\d{2}-\d{2}$/.test(value)) parsed.setUTCHours(23, 59, 59, 999);
     return parsed;
   }
 

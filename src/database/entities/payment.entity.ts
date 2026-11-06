@@ -1,11 +1,11 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { MaintenanceDue } from './maintenance-due.entity';
 import { User } from './user.entity';
 import { Resident } from './resident.entity';
 import { Flat } from './flat.entity';
 import { Organization } from './organization.entity';
 
-@Entity()
+@Entity('payments')
 export class Payment {
   @PrimaryColumn('uuid')
   id: string;
@@ -53,17 +53,22 @@ export class Payment {
   updated_at: Date;
 
   @ManyToOne(() => MaintenanceDue, (due) => due.id)
+  @JoinColumn({ name: 'maintenance_due_id' })
   maintenance_due: MaintenanceDue;
 
   @ManyToOne(() => User, (user) => user.userRoles)
+  @JoinColumn({ name: 'created_by' })
   createdByUser: User;
 
   @ManyToOne(() => Resident, (resident) => resident.id)
+  @JoinColumn({ name: 'resident_id' })
   resident: Resident | null;
 
   @ManyToOne(() => Flat, (flat) => flat.id)
+  @JoinColumn({ name: 'flat_id' })
   flat: Flat | null;
 
   @ManyToOne(() => Organization, (org) => org.userRoles)
+  @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 }

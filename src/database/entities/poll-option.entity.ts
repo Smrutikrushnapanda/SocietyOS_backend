@@ -1,8 +1,8 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Poll } from './poll.entity';
 import { Resident } from './resident.entity';
 
-@Entity()
+@Entity('poll_option')
 export class PollOption {
   @PrimaryColumn('uuid')
   id: string;
@@ -26,8 +26,10 @@ export class PollOption {
   created_at: Date;
 
   @ManyToOne(() => Poll)
+  @JoinColumn({ name: 'poll_id' })
   poll: Poll;
 
-  @ManyToOne(() => Resident)
+  @ManyToOne(() => Resident, { nullable: true })
+  @JoinColumn({ name: 'resident_id' })
   resident: Resident;
 }

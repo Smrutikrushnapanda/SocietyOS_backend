@@ -13,6 +13,8 @@ import { AuditLogFilters, AuditLogInput, AuditLogPage } from './audit.dto';
 
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 200;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class AuditService {
@@ -120,12 +122,18 @@ export class AuditService {
     }
 
     if (filters.entity_id) {
+      if (!UUID_REGEX.test(String(filters.entity_id))) {
+        throw new BadRequestException('Invalid entity_id filter: must be a valid UUID');
+      }
       query.andWhere('audit.entity_id = :entityId', {
         entityId: String(filters.entity_id),
       });
     }
 
     if (filters.actor_user_id) {
+      if (!UUID_REGEX.test(String(filters.actor_user_id))) {
+        throw new BadRequestException('Invalid actor_user_id filter: must be a valid UUID');
+      }
       query.andWhere('audit.actor_user_id = :actorUserId', {
         actorUserId: String(filters.actor_user_id),
       });
@@ -137,11 +145,12 @@ export class AuditService {
     }
 
     const to = this.parseDateFilter(filters.to, 'to');
+    if (from && to && from > to) throw new BadRequestException('From date must not be after to date');
     if (to) {
       query.andWhere('audit.created_at <= :to', { to });
     }
 
-    query.orderBy('audit.created_at', 'DESC');
+    query.orderBy('audit.created_at', 'DESC').addOrderBy('audit.id', 'DESC');
 
     const page = this.parsePositiveInt(
       filters.page,
@@ -207,6 +216,10 @@ export class AuditService {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) {
       throw new BadRequestException(`Invalid ${field} filter`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      if (parsed.toISOString().slice(0, 10) !== value) throw new BadRequestException(`Invalid ${field} filter`);
+      if (field === 'to') parsed.setUTCHours(23, 59, 59, 999);
     }
     return parsed;
   }

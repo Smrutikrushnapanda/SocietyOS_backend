@@ -3,35 +3,35 @@ import {
   IsNotEmpty,
   IsEnum,
   IsOptional,
-  IsDate,
+  IsDateString,
+  IsUUID,
+  MaxLength,
 } from 'class-validator';
 import { PassStatus } from '../enum/pass-status.enum';
 
 export class CreateVisitorPassDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   visitor_id: string;
 
   @IsOptional()
+  @IsUUID()
   visitor_visit_id?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   issuer?: string;
 
   @IsEnum(PassStatus)
   @IsNotEmpty()
   pass_status: PassStatus;
 
-  @IsDate()
+  @IsDateString()
   @IsNotEmpty()
-  validity_start: Date;
+  validity_start: Date | string;
 
-  @IsDate()
+  @IsDateString()
   @IsNotEmpty()
-  validity_end: Date;
-
-  @IsString()
-  @IsNotEmpty()
-  organization_id: string;
+  validity_end: Date | string;
 }

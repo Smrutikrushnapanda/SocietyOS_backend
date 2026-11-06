@@ -1,39 +1,23 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { AuthService } from '../auth.service';
 
 @Injectable()
-export class AuthGuard {
-  constructor(private readonly jwtService: JwtService) {}
+export class AuthGuard implements CanActivate {
+  constructor(private readonly jwtService: JwtService, @Optional() private readonly auth?: AuthService) {}
 
-  canActivate(context: ExecutionContext) {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-
     const authorization = request.headers['authorization'];
-
-    if (!authorization) {
-      return false;
-    }
-
-    const token = authorization.startsWith('Bearer ')
-      ? authorization.substring(7)
-      : undefined;
-
-    if (!token) {
-      return false;
-    }
-
+    if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) throw new UnauthorizedException('Authentication required');
+    let payload: { sub: string; sid: string; mobileNumber?: string; exp: number };
     try {
-      const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_ACCESS_TOKEN_SECRET,
-      });
-
-      request.user = {
-        id: payload.sub,
-        mobileNumber: payload.mobileNumber,
-      };
-      return true;
-    } catch (err) {
-      return false;
-    }
+      payload = this.jwtService.verify(authorization.slice(7), { secret: process.env.JWT_ACCESS_TOKEN_SECRET, algorithms: ['HS256'] });
+      if (!payload.sub || !payload.sid || !Number.isFinite(payload.exp)) throw new Error('Invalid claims');
+    } catch { throw new UnauthorizedException('Access token expired or invalid'); }
+    if (!this.auth) throw new UnauthorizedException('Session verification unavailable');
+    await this.auth.validateAccessSession(payload.sid, payload.sub, request.headers['x-organization-id']);
+    request.user = { id: payload.sub, mobileNumber: payload.mobileNumber, sessionId: payload.sid };
+    return true;
   }
 }

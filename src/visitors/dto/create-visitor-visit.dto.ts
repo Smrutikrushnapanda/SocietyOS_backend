@@ -3,12 +3,14 @@ import {
   IsNotEmpty,
   IsEnum,
   IsOptional,
-  IsDate,
+  IsDateString,
+  IsUUID,
+  MaxLength,
 } from 'class-validator';
 import { VisitorStatus } from '../enum/visitor-status.enum';
 
 export class CreateVisitorVisitDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   visitor_id: string;
 
@@ -18,13 +20,14 @@ export class CreateVisitorVisitDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   visit_purpose?: string;
 
-  @IsDate()
+  @IsDateString()
   @IsOptional()
-  expected_entry_time?: Date;
+  expected_entry_time?: string | Date;
 
-  @IsString()
-  @IsNotEmpty()
-  organization_id: string;
+  @IsUUID()
+  @IsOptional()
+  host_resident_id?: string;
 }

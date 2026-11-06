@@ -29,15 +29,54 @@ export interface AuditLogInput {
  * always taken from the resolved OrganizationContextService context and never
  * from query/body input.
  */
-export interface AuditLogFilters {
+import { Type } from 'class-transformer';
+import {
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
+
+export class AuditLogFilters {
+  @IsOptional()
+  @IsString()
   action?: string;
+
+  @IsOptional()
+  @IsString()
   entity_type?: string;
+
+  @IsOptional()
+  @IsUUID()
   entity_id?: string;
+
+  @IsOptional()
+  @IsUUID()
   actor_user_id?: string;
+
+  @IsOptional()
+  @IsDateString()
   from?: string;
+
+  @IsOptional()
+  @IsDateString()
   to?: string;
-  page?: number | string;
-  limit?: number | string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
 }
 
 export interface AuditLogPage {

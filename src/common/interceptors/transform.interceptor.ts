@@ -12,20 +12,25 @@ export class TransformInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     return next.handle().pipe(
       map((data) => {
-        if (data.success === undefined) {
-          return {
-            success: true,
-            data,
-            meta: {
-              page: 1,
-              limit: 25,
-              total:
-                typeof data?.length !== 'undefined' ? data.length : undefined,
-              totalPages: 1,
-            },
-          };
+        if (
+          data &&
+          typeof data === 'object' &&
+          'success' in data &&
+          data.success !== undefined
+        ) {
+          return data;
         }
-        return data;
+        return {
+          success: true,
+          data: data !== undefined ? data : null,
+          meta: {
+            page: 1,
+            limit: 25,
+            total:
+              typeof data?.length !== 'undefined' ? data.length : undefined,
+            totalPages: 1,
+          },
+        };
       }),
     );
   }

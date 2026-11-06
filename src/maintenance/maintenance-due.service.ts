@@ -1,7 +1,12 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { MaintenanceAccrualService } from './maintenance-accrual.service';
+import { calculateLateCharge, snapshotLatePolicy } from './late-charge.policy';
+import { Injectable, ForbiddenException, NotFoundException, Optional } from '@nestjs/common';
+import { WhatsAppEventsService } from '../whatsapp/whatsapp-events.service';
 import { DataSource } from 'typeorm';
 import { MaintenanceDue } from '../database/entities/maintenance-due.entity';
 import { Flat } from '../database/entities/flat.entity';
+import { Resident } from '../database/entities/resident.entity';
 import { MaintenanceConfiguration } from '../database/entities/maintenance-configuration.entity';
 import { OrganizationContextService } from '../organization/organization-context.service';
 import { AuditService } from '../audit/audit.service';
@@ -14,6 +19,8 @@ export class MaintenanceDueService {
     private readonly dataSource: DataSource,
     private readonly organizationContextService: OrganizationContextService,
     private readonly auditService: AuditService,
+    @Optional() private readonly whatsappEvents?: WhatsAppEventsService,
+    @Optional() private readonly accrual?: MaintenanceAccrualService,
   ) {}
 
   private buildAuditOptions(passed?: AuditCallContext, entityOrganizationId?: string | null, actorUserId?: string | null): AuditCallContext {
@@ -36,11 +43,13 @@ export class MaintenanceDueService {
     flatId: string,
     billingPeriodStart: Date,
     billingPeriodEnd: Date,
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     // Find the flat
     const flat = await this.dataSource.getRepository(Flat).findOneBy({
@@ -97,7 +106,7 @@ export class MaintenanceDueService {
     );
 
     const due = this.dataSource.getRepository(MaintenanceDue).create({
-      id: '00000000-0000-0000-0000-000000000000',
+      id: randomUUID(),
       flat_id: flatId,
       organization_id: flat.organization_id,
       base_maintenance_amount: config.base_maintenance_amount,
@@ -106,7 +115,8 @@ export class MaintenanceDueService {
       billing_period_start: billingPeriodStart,
       billing_period_end: billingPeriodEnd,
       due_date: dueDate,
-      late_charge: 0,
+      late_charge: calculateLateCharge(snapshotLatePolicy(config), calculatedAmount, dueDate),
+      late_charge_policy: snapshotLatePolicy(config),
       late_charge_waived: 0,
       status: 'PENDING',
     });
@@ -124,17 +134,16 @@ export class MaintenanceDueService {
       new_values: toSnapshot(due),
       ...extractRequestMeta(undefined),
     } as never);
+    void this.whatsappEvents?.flat(due.organization_id, due.flat_id, 'MAINTENANCE_DUE',
+      `*Maintenance due*\n\nAmount: ₹${due.calculated_amount}\nDue date: ${due.due_date.toISOString().slice(0, 10)}\nOpen SocietyOS for details.`, { key: 'maintenanceDue', variables: { amount: String(due.calculated_amount), due_date: due.due_date.toISOString().slice(0, 10) } });
     return due;
   }
 
   private calculateDueDate(billingPeriodStart: Date, dueDay: number): Date {
     const start = new Date(billingPeriodStart);
-    // Set the due date to the configured day of the billing period month
-    start.setDate(dueDay);
-    // If due day is after the last day of the month, JS will handle it (sets to last day of month)
-    // e.g., if dueDay=31 and month has 30 days, it becomes day 30
-
-    return start;
+    const year = start.getUTCFullYear(), month = start.getUTCMonth();
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(year, month, Math.min(dueDay, lastDay)));
   }
 
   async findOne(id: string, orgContext: any) {
@@ -143,6 +152,7 @@ export class MaintenanceDueService {
         ? orgContext.targetOrganizationId
         : orgContext.organization_id;
 
+    await this.accrual?.refresh(flatIdCondition);
     const due = await this.dataSource.getRepository(MaintenanceDue).findOneBy({
       id,
       organization_id: flatIdCondition,
@@ -156,11 +166,12 @@ export class MaintenanceDueService {
     return due;
   }
 
-  async findAllByOrganization() {
+  async findAllByOrganization(passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const flatIdCondition =
       orgContext.isSuperAdmin && orgContext.targetOrganizationId
@@ -171,11 +182,9 @@ export class MaintenanceDueService {
       .getRepository(MaintenanceDue)
       .createQueryBuilder('due');
 
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
-      query.where('due.organization_id = :orgId', {
-        orgId: orgContext.organization_id,
-      });
-    }
+    if (!flatIdCondition) throw new ForbiddenException('Organization context is required');
+    await this.accrual?.refresh(flatIdCondition);
+    query.where('due.organization_id = :orgId', { orgId: flatIdCondition });
 
     return query.getMany();
   }
@@ -191,11 +200,57 @@ export class MaintenanceDueService {
       .createQueryBuilder('due');
     query.where('due.flat_id = :flatId', { flatId });
 
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
-      query.andWhere('due.organization_id = :orgId', { orgId: organizationId });
-    }
+    if (!organizationId) throw new ForbiddenException('Organization context is required');
+    await this.accrual?.refresh(organizationId);
+    query.andWhere('due.organization_id = :orgId', { orgId: organizationId });
 
     return query.getMany();
+  }
+
+  async findMyDues(userId: string, passedOrgContext?: any) {
+    const orgContext =
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
+
+    const organizationId =
+      orgContext.targetOrganizationId ??
+      orgContext.organizationId ??
+      orgContext.organization_id;
+
+    if (!organizationId) {
+      throw new ForbiddenException('Organization context is required');
+    }
+
+    const resident = await this.dataSource.getRepository(Resident).findOneBy({
+      user_id: userId,
+      organization_id: organizationId,
+    });
+
+    if (!resident) {
+      throw new NotFoundException('Resident record not found');
+    }
+
+    if (!resident.flat_id) {
+      return [];
+    }
+
+    await this.accrual?.refresh(organizationId);
+    const repo = this.dataSource.getRepository(MaintenanceDue);
+    if (typeof repo.createQueryBuilder === 'function') {
+      const query = repo.createQueryBuilder('due');
+      query.where('due.organization_id = :orgId AND due.flat_id = :flatId', {
+        orgId: organizationId,
+        flatId: resident.flat_id,
+      });
+      return query.orderBy('due.createdAt', 'DESC').getMany();
+    }
+
+    return repo.findBy({
+      organization_id: organizationId,
+      flat_id: resident.flat_id,
+    } as any);
   }
 
   async markPaid(dueId: string, orgContext: any) {
@@ -227,6 +282,7 @@ export class MaintenanceDueService {
   async markOverdue(dueId: string, orgContext: any) {
     const due = await this.findOne(dueId, orgContext);
 
+    if (due.status === 'PAID') return due;
     if (due.status === 'OVERDUE') {
       return due; // Already overdue
     }
@@ -234,7 +290,7 @@ export class MaintenanceDueService {
     const oldValues = toSnapshot(due);
     // Check if past due date
     const now = new Date();
-    if (now > due.due_date) {
+    if (now > new Date(due.due_date)) {
       due.status = 'OVERDUE';
       // Calculate late charge if grace period has passed
       await this.calculateAndApplyLateCharge(due, now);
@@ -254,6 +310,8 @@ export class MaintenanceDueService {
         new_values: toSnapshot(due),
         ...extractRequestMeta(undefined),
       } as never);
+      void this.whatsappEvents?.flat(due.organization_id, due.flat_id, 'MAINTENANCE_OVERDUE',
+        '*Maintenance overdue*\n\nYour maintenance payment is overdue. Open SocietyOS to view outstanding dues.', { key: 'maintenanceOverdue', variables: { amount: String(Number(due.calculated_amount) + Number(due.late_charge) - Number(due.late_charge_waived)), due_date: new Date(due.due_date).toISOString().slice(0, 10) } });
     }
     return due;
   }
@@ -267,49 +325,63 @@ export class MaintenanceDueService {
 
     if (!config) return;
 
-    // Check grace period
-    const graceDays = config.late_charge_grace_days || 0;
-    const graceCutoff = new Date(due.due_date);
-    graceCutoff.setDate(graceCutoff.getDate() + graceDays);
-
-    if (now <= graceCutoff) {
-      return; // Grace period still active, no late charge
-    }
-
-    // Calculate late charge
-    let lateCharge = 0;
-
-    if (config.late_charge_type === 'FIXED') {
-      lateCharge = config.late_charge_value;
-    } else if (config.late_charge_type === 'PERCENTAGE') {
-      // Percentage of calculated_amount, rounded to 2 decimal places
-      lateCharge =
-        Math.round(
-          ((due.calculated_amount * config.late_charge_value) / 100) * 100,
-        ) / 100;
-    }
-
-    due.late_charge = lateCharge;
+    const policy = due.late_charge_policy ?? snapshotLatePolicy(config);
+    due.late_charge_policy = policy;
+    if (!policy.exempt) due.late_charge = Math.max(Number(due.late_charge), calculateLateCharge(policy, Number(due.calculated_amount), due.due_date, now));
     await this.dataSource.getRepository(MaintenanceDue).save(due);
   }
 
-  async waiveLateCharge(dueId: string, adminUserId: string, reason?: string) {
+  async waiveLateCharge(
+    dueId: string,
+    adminUserId: string,
+    reason?: string,
+    passedOrgContext?: any,
+    stopFutureCharges = true,
+  ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const due = await this.findOne(dueId, orgContext);
 
-    // Only SOCIETY_ADMIN or SUPER_ADMIN can waive
+    // Phase 11 Step 2: the role check must use the membership of the target
+    // organization, not an arbitrary membership of a multi-org user.
+    const targetOrganizationId = orgContext.isSuperAdmin
+      ? orgContext.targetOrganizationId
+      : orgContext.organization_id;
+    if (!targetOrganizationId) {
+      throw new ForbiddenException('Organization context is required');
+    }
+
+    // Only SOCIETY_ADMIN or SUPER_ADMIN can waive.
+    // The membership used must be the one for the target organization; a
+    // platform-scoped SUPER_ADMIN membership (organization_id NULL) is only
+    // honored when the user actually holds the SUPER_ADMIN role.
     const userRoleRepo = this.dataSource.getRepository('UserRole');
-    const userRole = await userRoleRepo.findOneBy({ userId: adminUserId });
+    const roleRepo = this.dataSource.getRepository('Role');
+
+    let userRole;
+    if (orgContext.isSuperAdmin) {
+      // Acting as platform-scoped SUPER_ADMIN: the platform membership
+      // (organization_id NULL) is the one in effect.
+      userRole = await userRoleRepo.findOneBy({
+        userId: adminUserId,
+        organization_id: null as any,
+      });
+    } else {
+      // Normal user: only the membership of the target organization counts.
+      userRole = await userRoleRepo.findOneBy({
+        userId: adminUserId,
+        organization_id: targetOrganizationId,
+      });
+    }
 
     if (!userRole) {
       throw new ForbiddenException('User role not found');
     }
 
-    const roleRepo = this.dataSource.getRepository('Role');
     const role = await roleRepo.findOneBy({ id: userRole.roleId });
 
     if (!role) {
@@ -323,7 +395,7 @@ export class MaintenanceDueService {
     }
 
     // Check if already fully waived
-    if (due.late_charge_waived >= due.late_charge) {
+    if (Number(due.late_charge_waived) >= Number(due.late_charge)) {
       throw new ForbiddenException('Late charge has already been fully waived');
     }
 
@@ -333,6 +405,7 @@ export class MaintenanceDueService {
     due.late_charge_waived_by = adminUserId;
     due.late_charge_waived_at = new Date();
     due.late_charge_waiver_reason = reason ?? null;
+    if (due.late_charge_policy) due.late_charge_policy = { ...due.late_charge_policy, exempt: stopFutureCharges };
 
     // Due status remains PENDING or OVERDUE - waiver only affects late charge
     // calculated_amount is NOT changed

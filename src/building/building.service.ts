@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Building } from '../database/entities/building.entity';
 import { OrganizationContextService } from '../organization/organization-context.service';
 import { AuditService } from '../audit/audit.service';
@@ -19,16 +20,23 @@ export class BuildingService {
     private readonly auditService: AuditService,
   ) {}
 
-  async create(createBuildingDto: {
-    organization_id: string;
-    name: string;
-    code?: string;
-    totalFloors?: number;
-  }) {
+  async create(
+    createBuildingDto: {
+      organization_id: string;
+      name: string;
+      code?: string;
+      totalFloors?: number;
+    },
+    passedOrgContext?: any,
+  ) {
+    // Phase 11 Step 2: the guard-resolved organization context is the only
+    // trusted context source; the fallback keeps direct (non-HTTP) callers
+    // fail-closed with an empty context.
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     if (orgContext.isSuperAdmin) {
       if (
@@ -55,7 +63,7 @@ export class BuildingService {
     }
 
     const building = this.dataSource.getRepository(Building).create({
-      id: '00000000-0000-0000-0000-000000000000',
+      id: randomUUID(),
       organization_id: createBuildingDto.organization_id,
       name: createBuildingDto.name,
       code: createBuildingDto.code,
@@ -79,30 +87,42 @@ export class BuildingService {
     return building;
   }
 
-  async findAll() {
+  async findAll(passedOrgContext?: any, includeInactive?: boolean) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const query = this.dataSource
       .getRepository(Building)
       .createQueryBuilder('building');
 
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
+    const organizationId =
+      orgContext.targetOrganizationId ??
+      orgContext.organizationId ??
+      orgContext.organization_id;
+
+    if (organizationId) {
       query.where('building.organization_id = :orgId', {
-        orgId: orgContext.organization_id,
+        orgId: organizationId,
       });
+      if (!includeInactive) {
+        query.andWhere('building.is_active = true');
+      }
+    } else if (!orgContext.isSuperAdmin) {
+      query.where('1 = 0');
     }
 
     return query.getMany();
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const building = await this.dataSource.getRepository(Building).findOneBy({
       id,
@@ -126,11 +146,13 @@ export class BuildingService {
       totalFloors?: number;
       isActive?: boolean;
     },
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const building = await this.dataSource.getRepository(Building).findOneBy({
       id,
@@ -153,8 +175,41 @@ export class BuildingService {
     }
 
     const oldValues = toSnapshot(building);
+    const prevTotalFloors = (building as any).totalFloors ?? 0;
     Object.assign(building, updateBuildingDto);
     await this.dataSource.getRepository(Building).save(building);
+
+    // When floor count is reduced, prune excess floor records that have no flats.
+    const newTotalFloors = updateBuildingDto.totalFloors;
+    let floorsWithFlatsSkipped = 0;
+    if (
+      newTotalFloors !== undefined &&
+      prevTotalFloors > newTotalFloors
+    ) {
+      const floorRepo = this.dataSource.getRepository('Floor');
+      const flatRepo = this.dataSource.getRepository('Flat');
+
+      // Find all floor records for this building above the new limit
+      const excessFloors: any[] = await (floorRepo as any).find({
+        where: { building_id: id },
+      });
+
+      for (const floor of excessFloors) {
+        if (floor.floor_number > newTotalFloors) {
+          // Only delete if no flats are assigned to this floor
+          const flatCount = await (flatRepo as any).count
+            ? await (flatRepo as any).count({ where: { floor_id: floor.id } })
+            : await (flatRepo as any).countBy({ floor_id: floor.id });
+
+          if (flatCount === 0) {
+            await (floorRepo as any).delete({ id: floor.id });
+          } else {
+            floorsWithFlatsSkipped++;
+          }
+        }
+      }
+    }
+
     await recordAudit(this.auditService as any, {
       ...resolveAuditContext({
         orgContext,
@@ -167,14 +222,20 @@ export class BuildingService {
       new_values: toSnapshot(building),
       ...extractRequestMeta(undefined),
     } as never);
-    return building;
+    return {
+      ...building,
+      ...(floorsWithFlatsSkipped > 0 && {
+        warning: `${floorsWithFlatsSkipped} floor(s) above the new limit still have flats and were not removed.`,
+      }),
+    };
   }
 
-  async remove(id: string) {
+  async remove(id: string, passedOrgContext?: any, permanent?: boolean) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const building = await this.dataSource.getRepository(Building).findOneBy({
       id,
@@ -188,9 +249,32 @@ export class BuildingService {
       throw new ForbiddenException('Building not found or access denied');
     }
 
+    // Inspect linked units (flats) before deletion
+    const flatRepo = this.dataSource.getRepository('Flat');
+    let flatCount = 0;
+    if (flatRepo && typeof (flatRepo as any).countBy === 'function') {
+      flatCount = await (flatRepo as any).countBy({ building_id: id });
+    } else if (flatRepo && typeof (flatRepo as any).count === 'function') {
+      flatCount = await (flatRepo as any).count({ where: { building_id: id } });
+    }
+    if (flatCount > 0) {
+      throw new ForbiddenException(
+        `Cannot delete building "${building.name}". It contains ${flatCount} flats/units. Remove or reassign flats first.`,
+      );
+    }
+
     const oldValues = toSnapshot(building);
-    building.isActive = false;
-    await this.dataSource.getRepository(Building).save(building);
+
+    if (permanent) {
+      // Clean up linked empty placeholder floors before removing building
+      const floorRepo = this.dataSource.getRepository('Floor');
+      await floorRepo.delete({ building_id: id });
+      await this.dataSource.getRepository(Building).delete({ id });
+    } else {
+      building.isActive = false;
+      await this.dataSource.getRepository(Building).save(building);
+    }
+
     await recordAudit(this.auditService as any, {
       ...resolveAuditContext({
         orgContext,
@@ -203,6 +287,6 @@ export class BuildingService {
       new_values: null,
       ...extractRequestMeta(undefined),
     } as never);
-    return building;
+    return { ...building, isActive: false, permanent: !!permanent };
   }
 }

@@ -3,6 +3,7 @@ import {
   IsDateString,
   IsIn,
   IsInt,
+  IsOptional,
   IsString,
   IsUUID,
   Matches,
@@ -62,8 +63,8 @@ export const COMPLAINT_STATUSES = [
   'CLOSED',
 ] as const;
 export const COMPLAINT_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'] as const;
-/** Notice statuses are exactly these three. EXPIRED is NOT a notice status. */
-export const NOTICE_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
+/** Notice statuses include the approved scheduled publication workflow. */
+export const NOTICE_STATUSES = ['DRAFT', 'SCHEDULED', 'PUBLISHED', 'ARCHIVED'] as const;
 /** Poll statuses are exactly these three. */
 export const POLL_STATUSES = ['DRAFT', 'PUBLISHED', 'CLOSED'] as const;
 export const BOOLEAN_FILTERS = ['true', 'false'] as const;
@@ -89,30 +90,38 @@ export class ReportPaginationDto {
  * from > to is rejected (400) by the service; the DTO enforces ISO validity.
  */
 export class ReportDateRangeDto extends ReportPaginationDto {
+  @IsOptional()
   @IsDateString()
   from?: string;
 
+  @IsOptional()
   @IsDateString()
   to?: string;
 }
 
 /** GET /reports/residents */
 export class ResidentsReportQueryDto extends ReportPaginationDto {
+  @IsOptional()
   @IsIn(RESIDENT_KYC_STATUSES)
   kyc_status?: string;
 
+  @IsOptional()
   @IsIn(BOOLEAN_FILTERS)
   app_access?: string;
 
+  @IsOptional()
   @IsIn(BOOLEAN_FILTERS)
   active?: string;
 
+  @IsOptional()
   @IsUUID()
   building_id?: string;
 
+  @IsOptional()
   @IsUUID()
   floor_id?: string;
 
+  @IsOptional()
   @IsUUID()
   flat_id?: string;
 }
@@ -121,9 +130,11 @@ export class ResidentsReportQueryDto extends ReportPaginationDto {
 export class VisitorsReportQueryDto
   extends ReportDateRangeDto
 {
+  @IsOptional()
   @IsIn(VISITOR_VISIT_STATUSES)
   visit_status?: string;
 
+  @IsOptional()
   @IsUUID()
   visitor_id?: string;
 }
@@ -132,19 +143,24 @@ export class VisitorsReportQueryDto
 export class MaintenanceDuesReportQueryDto
   extends ReportDateRangeDto
 {
+  @IsOptional()
   @IsIn(MAINTENANCE_DUE_STATUSES)
   status?: string;
 
+  @IsOptional()
   @IsUUID()
   flat_id?: string;
 
+  @IsOptional()
   @IsUUID()
   building_id?: string;
 
   /** Billing period as YYYY-MM (matches billing_period_start). */
+  @IsOptional()
   @Matches(BILLING_PERIOD_PATTERN)
   billing_period?: string;
 
+  @IsOptional()
   @IsIn(BOOLEAN_FILTERS)
   has_late_charge?: string;
 }
@@ -153,21 +169,27 @@ export class MaintenanceDuesReportQueryDto
 export class PaymentsReportQueryDto
   extends ReportDateRangeDto
 {
+  @IsOptional()
   @IsIn(PAYMENT_STATUSES)
   payment_status?: string;
 
+  @IsOptional()
   @IsIn(PAYMENT_METHODS)
   payment_method?: string;
 
+  @IsOptional()
   @IsUUID()
   flat_id?: string;
 
+  @IsOptional()
   @IsUUID()
   building_id?: string;
 
+  @IsOptional()
   @IsUUID()
   resident_id?: string;
 
+  @IsOptional()
   @IsUUID()
   maintenance_due_id?: string;
 }
@@ -176,22 +198,28 @@ export class PaymentsReportQueryDto
 export class ComplaintsReportQueryDto
   extends ReportDateRangeDto
 {
+  @IsOptional()
   @IsIn(COMPLAINT_STATUSES)
   status?: string;
 
+  @IsOptional()
   @IsIn(COMPLAINT_PRIORITIES)
   priority?: string;
 
+  @IsOptional()
   @IsString()
   @MaxLength(100)
   category?: string;
 
+  @IsOptional()
   @IsUUID()
   assigned_to?: string;
 
+  @IsOptional()
   @IsUUID()
   flat_id?: string;
 
+  @IsOptional()
   @IsUUID()
   building_id?: string;
 }
@@ -200,6 +228,7 @@ export class ComplaintsReportQueryDto
 export class NoticesReportQueryDto
   extends ReportDateRangeDto
 {
+  @IsOptional()
   @IsIn(NOTICE_STATUSES)
   status?: string;
 }
@@ -208,6 +237,7 @@ export class NoticesReportQueryDto
 export class PollsReportQueryDto
   extends ReportDateRangeDto
 {
+  @IsOptional()
   @IsIn(POLL_STATUSES)
   status?: string;
 }

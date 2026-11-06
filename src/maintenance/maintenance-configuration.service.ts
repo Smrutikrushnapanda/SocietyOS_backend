@@ -1,4 +1,6 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { UpdateMaintenanceConfigurationDto } from './dto';
+import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { MaintenanceConfiguration } from '../database/entities/maintenance-configuration.entity';
 import { OrganizationContextService } from '../organization/organization-context.service';
@@ -31,6 +33,15 @@ export class MaintenanceConfigurationService {
     void recordAudit(this.auditService as any, { ...ctx, action, entity_type: entityType, entity_id: entityId, old_values: oldValues, new_values: newValues, ...meta } as never);
   }
 
+  async saveForOrganization(organizationId: string, dto: UpdateMaintenanceConfigurationDto, context: any) {
+    const config = await this.findOneByOrganization(organizationId);
+    const next = { base_maintenance_amount: 0, due_day_of_month: 10, late_charge_type: 'FIXED' as const, late_charge_value: 0, late_charge_grace_days: 0, late_charge_frequency: 'ONCE' as const, late_charge_start: 'FIRST_DAY' as const, ...config, ...dto };
+    if (next.late_charge_type === 'PERCENTAGE' && next.late_charge_frequency !== 'ONCE') throw new BadRequestException('Percentage late fees apply once; recurring fees require a fixed amount');
+    if (next.late_charge_type === 'PERCENTAGE' && next.late_charge_value > 100) throw new BadRequestException('Percentage must be between 0 and 100');
+    if (config) return this.update(config.id, dto, context);
+    return this.create({ ...next, organization_id: organizationId }, context);
+  }
+
   async findOneByOrganization(organizationId: string) {
     const config = await this.dataSource
       .getRepository(MaintenanceConfiguration)
@@ -47,18 +58,24 @@ export class MaintenanceConfigurationService {
     });
   }
 
-  async create(createDto: {
-    organization_id: string;
-    base_maintenance_amount: number;
-    due_day_of_month: number;
-    late_charge_type: 'FIXED' | 'PERCENTAGE';
-    late_charge_value: number;
-    late_charge_grace_days: number;
-  }) {
+  async create(
+    createDto: {
+      organization_id: string;
+      base_maintenance_amount: number;
+      due_day_of_month: number;
+      late_charge_type: 'FIXED' | 'PERCENTAGE';
+      late_charge_frequency?: 'ONCE' | 'DAILY' | 'WEEKLY';
+      late_charge_start?: 'FIRST_DAY' | 'AFTER_PERIOD';
+      late_charge_value: number;
+      late_charge_grace_days: number;
+    },
+    passedOrgContext?: any,
+  ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     // Check organization access
     if (!orgContext.isSuperAdmin && orgContext.organization_id) {
@@ -72,13 +89,16 @@ export class MaintenanceConfigurationService {
     const config = this.dataSource
       .getRepository(MaintenanceConfiguration)
       .create({
+        id: randomUUID(),
         organization_id: createDto.organization_id,
         base_maintenance_amount: createDto.base_maintenance_amount,
         due_day_of_month: createDto.due_day_of_month,
         late_charge_type: createDto.late_charge_type,
         late_charge_value: createDto.late_charge_value,
         late_charge_grace_days: createDto.late_charge_grace_days,
-        isActive: true,
+        late_charge_frequency: createDto.late_charge_frequency ?? 'ONCE',
+        late_charge_start: createDto.late_charge_start ?? 'FIRST_DAY',
+        is_active: true,
       } as any);
 
     await this.dataSource.getRepository(MaintenanceConfiguration).save(config);
@@ -103,15 +123,19 @@ export class MaintenanceConfigurationService {
       base_maintenance_amount?: number;
       due_day_of_month?: number;
       late_charge_type?: 'FIXED' | 'PERCENTAGE';
+      late_charge_frequency?: 'ONCE' | 'DAILY' | 'WEEKLY';
+      late_charge_start?: 'FIRST_DAY' | 'AFTER_PERIOD';
       late_charge_value?: number;
       late_charge_grace_days?: number;
       is_active?: boolean;
     },
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const config = await this.dataSource
       .getRepository(MaintenanceConfiguration)

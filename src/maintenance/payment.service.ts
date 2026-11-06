@@ -1,4 +1,9 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { ResidentPageDto, residentPage } from '../common/resident-page';
+import { BadRequestException as FeedBadRequestException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { MaintenanceAccrualService } from './maintenance-accrual.service';
+import { Injectable, ForbiddenException, NotFoundException, Optional } from '@nestjs/common';
+import { WhatsAppEventsService } from '../whatsapp/whatsapp-events.service';
 import { DataSource } from 'typeorm';
 import { Payment } from '../database/entities/payment.entity';
 import { MaintenanceDue } from '../database/entities/maintenance-due.entity';
@@ -15,6 +20,8 @@ export class PaymentService {
     private readonly dataSource: DataSource,
     private readonly organizationContextService: OrganizationContextService,
     private readonly auditService: AuditService,
+    @Optional() private readonly whatsappEvents?: WhatsAppEventsService,
+    @Optional() private readonly accrual?: MaintenanceAccrualService,
   ) {}
 
   private buildAuditOptions(passed?: AuditCallContext, entityOrganizationId?: string | null, actorUserId?: string | null): AuditCallContext {
@@ -33,6 +40,13 @@ export class PaymentService {
     void recordAudit(this.auditService as any, { ...ctx, action, entity_type: entityType, entity_id: entityId, old_values: oldValues, new_values: newValues, ...meta } as never);
   }
 
+  async findMyPage(userId: string, context: any, query: ResidentPageDto) {
+    if (!['all', 'PENDING', 'COMPLETED', 'FAILED', 'REFUNDED'].includes(query.tab ?? 'all')) throw new FeedBadRequestException('Invalid payment history tab');
+    return residentPage(this.dataSource, Payment, userId, context, query, 'resident_id', 'created_at', qb => {
+      if (query.tab && query.tab !== 'all') qb.andWhere('record.payment_status = :status', { status: query.tab });
+    });
+  }
+
   async create(
     createDto: {
       organization_id: string;
@@ -43,12 +57,15 @@ export class PaymentService {
       payment_method: 'CASH' | 'UPI' | 'NET_BANKING' | 'CHEQUE' | 'CARD';
     },
     creatorUserId: string,
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
+    await this.accrual?.refresh(orgContext.targetOrganizationId ?? orgContext.organizationId ?? orgContext.organization_id);
     // Verify maintenance due exists and org matches
     const due = await this.dataSource
       .getRepository('MaintenanceDue')
@@ -66,20 +83,11 @@ export class PaymentService {
       );
     }
 
-    // Verify resident/flat ownership if provided
-    if (createDto.resident_id) {
-      const resident = await this.dataSource.getRepository(Resident).findOneBy({
-        id: createDto.resident_id,
-        organization_id:
-          orgContext.isSuperAdmin && orgContext.targetOrganizationId
-            ? orgContext.targetOrganizationId
-            : orgContext.organization_id,
-      });
-
-      if (!resident) {
-        throw new ForbiddenException('Resident not found or access denied');
-      }
+    // Verify flat matches due if provided
+    if (createDto.flat_id && due.flat_id && createDto.flat_id !== due.flat_id) {
+      throw new ForbiddenException('Flat ID does not match the maintenance due flat');
     }
+    const resolvedFlatId = due.flat_id || createDto.flat_id;
 
     if (createDto.flat_id) {
       const flat = await this.dataSource.getRepository('Flat').findOneBy({
@@ -95,9 +103,27 @@ export class PaymentService {
       }
     }
 
+    // Verify resident/flat ownership if provided
+    if (createDto.resident_id) {
+      const resident = await this.dataSource.getRepository(Resident).findOneBy({
+        id: createDto.resident_id,
+        organization_id:
+          orgContext.isSuperAdmin && orgContext.targetOrganizationId
+            ? orgContext.targetOrganizationId
+            : orgContext.organization_id,
+      });
+
+      if (!resident) {
+        throw new ForbiddenException('Resident not found or access denied');
+      }
+      if (resident.flat_id && resolvedFlatId && resident.flat_id !== resolvedFlatId) {
+        throw new ForbiddenException('Resident does not belong to the flat for this maintenance due');
+      }
+    }
+
     // Validate amount does not exceed outstanding amount
     const outstanding =
-      due.calculated_amount + due.late_charge - due.late_charge_waived;
+      Number(due.calculated_amount) + Number(due.late_charge) - Number(due.late_charge_waived);
 
     if (createDto.amount > outstanding) {
       throw new ForbiddenException(
@@ -120,13 +146,13 @@ export class PaymentService {
     }
 
     const payment = this.dataSource.getRepository(Payment).create({
-      id: '00000000-0000-0000-0000-000000000000',
+      id: randomUUID(),
       organization_id:
         orgContext.isSuperAdmin && orgContext.targetOrganizationId
           ? orgContext.targetOrganizationId
           : orgContext.organization_id,
       resident_id: createDto.resident_id,
-      flat_id: createDto.flat_id,
+      flat_id: resolvedFlatId,
       maintenance_due_id: createDto.maintenance_due_id,
       amount: createDto.amount,
       payment_method: createDto.payment_method,
@@ -157,7 +183,17 @@ export class PaymentService {
       new_values: toSnapshot(payment),
       ...extractRequestMeta(undefined),
     } as never);
+    this.notifyPayment(payment, 'recorded');
     return payment;
+  }
+
+  private notifyPayment(payment: Payment, state: string): void {
+    const message = `*Payment ${state}*\n\nAmount: ₹${payment.amount}\nReference: ${payment.id}\nOpen SocietyOS for receipt details.`;
+    if (payment.resident_id) {
+      void this.whatsappEvents?.resident(payment.organization_id, payment.resident_id, 'PAYMENT_CONFIRMATION', message);
+    } else if (payment.flat_id) {
+      void this.whatsappEvents?.flat(payment.organization_id, payment.flat_id, 'PAYMENT_CONFIRMATION', message);
+    }
   }
 
   async findOne(id: string, orgContext: any) {
@@ -191,24 +227,81 @@ export class PaymentService {
     return query.getMany();
   }
 
+  async findMyPayments(userId: string, passedOrgContext?: any) {
+    const orgContext =
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
+
+    const organizationId =
+      orgContext.targetOrganizationId ??
+      orgContext.organizationId ??
+      orgContext.organization_id;
+
+    if (!organizationId) {
+      throw new ForbiddenException('Organization context is required');
+    }
+
+    const resident = await this.dataSource.getRepository(Resident).findOneBy({
+      user_id: userId,
+      organization_id: organizationId,
+    });
+
+    if (!resident) {
+      throw new NotFoundException('Resident record not found');
+    }
+
+    const repo = this.dataSource.getRepository(Payment);
+    if (typeof repo.createQueryBuilder === 'function') {
+      const query = repo.createQueryBuilder('payment');
+      query.where(
+        'payment.organization_id = :orgId AND payment.resident_id = :residentId',
+        {
+          orgId: organizationId,
+          residentId: resident.id,
+        },
+      );
+      return query.orderBy('payment.created_at', 'DESC').getMany();
+    }
+
+    return repo.findBy({
+      organization_id: organizationId,
+      resident_id: resident.id,
+    } as any);
+  }
+
   async findAllByResident(residentId: string, orgContext: any) {
     const condition =
       orgContext.isSuperAdmin && orgContext.targetOrganizationId
         ? orgContext.targetOrganizationId
         : orgContext.organization_id;
 
+    if (!condition) {
+      throw new ForbiddenException('Organization context is required');
+    }
+
+    const resident = await this.dataSource.getRepository(Resident).findOneBy({
+      id: residentId,
+      organization_id: condition,
+    });
+
+    if (!resident) {
+      throw new NotFoundException('Resident not found in this organization');
+    }
+
     const query = this.dataSource
       .getRepository(Payment)
       .createQueryBuilder('payment');
-    query.where('payment.resident_id = :residentId', { residentId });
+    query.where(
+      'payment.resident_id = :residentId AND payment.organization_id = :orgId',
+      {
+        residentId,
+        orgId: condition,
+      },
+    );
 
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
-      query.andWhere('payment.organization_id = :orgId', {
-        orgId: orgContext.organization_id,
-      });
-    }
-
-    return query.getMany();
+    return query.orderBy('payment.created_at', 'DESC').getMany();
   }
 
   async markCompleted(paymentId: string, orgContext: any) {
@@ -233,6 +326,7 @@ export class PaymentService {
       new_values: toSnapshot(payment),
       ...extractRequestMeta(undefined),
     } as never);
+    this.notifyPayment(payment, 'completed');
     return payment;
   }
 

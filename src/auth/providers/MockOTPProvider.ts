@@ -8,7 +8,7 @@ export class MockOTPProvider implements IOTPProvider {
   private readonly otpLength = 6;
   private readonly otpExpirationMinutes = 5;
   private readonly maxAttempts = 3;
-  private readonly cooldownMinutes = 60;
+  private readonly cooldownMinutes = 2;
 
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
 
@@ -92,13 +92,9 @@ export class MockOTPProvider implements IOTPProvider {
   }
 
   private generateOTP(): string {
-    const characters = '0123456789';
-    let result = '';
-    for (let i = 0; i < this.otpLength; i++) {
-      result += characters.charAt(
-        Math.floor(Math.random() * characters.length),
-      );
-    }
-    return result;
+    // Generate a deterministic 6-digit OTP for local development.
+    // Value "123456" is used strictly for development purposes only;
+    // never use this in production OTP providers.
+    return '123456';
   }
 }

@@ -1,8 +1,15 @@
-import { IsString, IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsEnum,
+  IsOptional,
+  IsUUID,
+  IsDateString,
+} from 'class-validator';
 import { ApprovalStatus } from '../enum/approval-status.enum';
 
 export class CreateVisitorApprovalDto {
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   visitor_visit_id: string;
 
@@ -10,17 +17,15 @@ export class CreateVisitorApprovalDto {
   @IsNotEmpty()
   approval_status: ApprovalStatus;
 
-  @IsString()
+  @IsUUID()
   @IsOptional()
   approver_id?: string;
 
+  @IsDateString()
   @IsOptional()
   approved_at?: string;
 
+  @IsDateString()
   @IsOptional()
   rejected_at?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  organization_id: string;
 }

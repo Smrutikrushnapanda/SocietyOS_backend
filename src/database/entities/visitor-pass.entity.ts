@@ -1,9 +1,9 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Visitor } from './visitor.entity';
 import { VisitorVisit } from './visitor-visit.entity';
 import { Organization } from './organization.entity';
 
-@Entity()
+@Entity('visitor_passes')
 export class VisitorPass {
   @PrimaryColumn('uuid')
   id: string;
@@ -34,20 +34,24 @@ export class VisitorPass {
   validity_end: Date;
 
   @Column({
+    name: 'created_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   createdAt: Date;
 
   @Column({
+    name: 'updated_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   updatedAt: Date;
 
   @ManyToOne(() => Visitor, (visitor) => visitor.id)
+  @JoinColumn({ name: 'visitor_id' })
   visitor: Visitor;
 
   @ManyToOne(() => VisitorVisit, (visit) => visit.id, { nullable: true })
+  @JoinColumn({ name: 'visitor_visit_id' })
   visitor_visit: VisitorVisit | null;
 }

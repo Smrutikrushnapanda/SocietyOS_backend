@@ -1,4 +1,6 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { VisitorLiveEvents } from './live/visitor-live.events';
+import { randomUUID } from 'crypto';
+import { Injectable, ForbiddenException, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { VisitorApproval } from '../database/entities/visitor-approval.entity';
 import { VisitorVisit } from '../database/entities/visitor-visit.entity';
@@ -14,6 +16,7 @@ export class VisitorApprovalService {
     private readonly dataSource: DataSource,
     private readonly organizationContextService: OrganizationContextService,
     private readonly auditService: AuditService,
+    @Optional() private readonly live?: VisitorLiveEvents,
   ) {}
 
   private buildAuditOptions(passed?: AuditCallContext, entityOrganizationId?: string | null, actorUserId?: string | null): AuditCallContext {
@@ -32,24 +35,46 @@ export class VisitorApprovalService {
     void recordAudit(this.auditService as any, { ...ctx, action, entity_type: entityType, entity_id: entityId, old_values: oldValues, new_values: newValues, ...meta } as never);
   }
 
-  async createVisitorApproval(createVisitorApprovalDto: {
-    organization_id: string;
-    visitor_visit_id: string;
-    approval_status: string;
-    approver_id?: string;
-    approved_at?: string;
-    rejected_at?: string;
-  }) {
+  async createVisitorApproval(
+    createVisitorApprovalDto: {
+      organization_id: string;
+      visitor_visit_id: string;
+      approval_status: string;
+      approver_id?: string;
+      approved_at?: string;
+      rejected_at?: string;
+    },
+    passedOrgContext?: any,
+  ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
-    // Validate visitor_visit belongs to same organization
+    // Phase 11 Step 2: the authoritative organization always comes from the
+    // guard-resolved context. A client-supplied organization_id never grants
+    // authorization and must match the context when present.
+    const targetOrganizationId = orgContext.isSuperAdmin
+      ? orgContext.targetOrganizationId
+      : orgContext.organization_id;
+    if (!targetOrganizationId) {
+      throw new ForbiddenException('Organization context is required');
+    }
+    if (
+      createVisitorApprovalDto.organization_id &&
+      createVisitorApprovalDto.organization_id !== targetOrganizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only create visitor approvals in your organization',
+      );
+    }
+
+    // Validate visitor_visit belongs to the target organization
     const visitRepository = this.dataSource.getRepository(VisitorVisit);
     const visitorVisit = await visitRepository.findOneBy({
       id: createVisitorApprovalDto.visitor_visit_id,
-      organization_id: createVisitorApprovalDto.organization_id,
+      organization_id: targetOrganizationId,
     });
 
     if (!visitorVisit) {
@@ -65,7 +90,8 @@ export class VisitorApprovalService {
     const visitorApproval = this.dataSource
       .getRepository(VisitorApproval)
       .create({
-        organization_id: createVisitorApprovalDto.organization_id,
+        id: randomUUID(),
+        organization_id: targetOrganizationId,
         visitor_visit_id: createVisitorApprovalDto.visitor_visit_id,
         approval_status: createVisitorApprovalDto.approval_status as
           'PENDING' | 'APPROVED' | 'REJECTED',
@@ -79,6 +105,14 @@ export class VisitorApprovalService {
       } as Partial<VisitorApproval>);
 
     await this.dataSource.getRepository(VisitorApproval).save(visitorApproval);
+    this.live?.publish(
+      {
+        id: visitorApproval.visitor_visit_id,
+        organization_id: visitorApproval.organization_id,
+        updatedAt: visitorApproval.updatedAt,
+      },
+      'visit.approval_changed',
+    );
     await recordAudit(this.auditService as any, {
       ...resolveAuditContext({
         orgContext,
@@ -94,30 +128,32 @@ export class VisitorApprovalService {
     return visitorApproval;
   }
 
-  async findAll() {
+  async findAll(passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const query = this.dataSource
       .getRepository(VisitorApproval)
       .createQueryBuilder('visitor_approval');
 
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
-      query.where('visitor_approval.organization_id = :orgId', {
-        orgId: orgContext.organization_id,
-      });
-    }
+    const organizationId = orgContext.isSuperAdmin
+      ? orgContext.targetOrganizationId
+      : orgContext.organization_id;
+    if (!organizationId) throw new ForbiddenException('Organization context is required');
+    query.where('visitor_approval.organization_id = :orgId', { orgId: organizationId });
 
     return query.getMany();
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const visitorApproval = await this.dataSource
       .getRepository(VisitorApproval)
@@ -145,11 +181,13 @@ export class VisitorApprovalService {
       rejected_at?: string;
       organization_id?: string;
     },
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const visitorApproval = await this.dataSource
       .getRepository(VisitorApproval)
@@ -197,6 +235,14 @@ export class VisitorApprovalService {
     }
 
     await this.dataSource.getRepository(VisitorApproval).save(visitorApproval);
+    this.live?.publish(
+      {
+        id: visitorApproval.visitor_visit_id,
+        organization_id: visitorApproval.organization_id,
+        updatedAt: visitorApproval.updatedAt,
+      },
+      'visit.approval_changed',
+    );
     await recordAudit(this.auditService as any, {
       ...resolveAuditContext({
         orgContext,
@@ -212,11 +258,12 @@ export class VisitorApprovalService {
     return visitorApproval;
   }
 
-  async remove(id: string) {
+  async remove(id: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const visitorApproval = await this.dataSource
       .getRepository(VisitorApproval)
@@ -247,6 +294,14 @@ export class VisitorApprovalService {
     visitorApproval.approval_status = 'REJECTED' as const;
     visitorApproval.rejected_at = new Date();
     await this.dataSource.getRepository(VisitorApproval).save(visitorApproval);
+    this.live?.publish(
+      {
+        id: visitorApproval.visitor_visit_id,
+        organization_id: visitorApproval.organization_id,
+        updatedAt: visitorApproval.updatedAt,
+      },
+      'visit.approval_changed',
+    );
     await recordAudit(this.auditService as any, {
       ...resolveAuditContext({
         orgContext,

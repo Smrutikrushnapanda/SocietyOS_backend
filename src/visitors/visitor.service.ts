@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Visitor } from '../database/entities/visitor.entity';
 import { OrganizationContextService } from '../organization/organization-context.service';
 import { Request } from 'express';
@@ -31,22 +32,33 @@ export class VisitorService {
     void recordAudit(this.auditService as any, { ...ctx, action, entity_type: entityType, entity_id: entityId, old_values: oldValues, new_values: newValues, ...meta } as never);
   }
 
-  async createVisitor(createVisitorDto: {
-    organization_id: string;
-    name: string;
-    mobile: string;
-    active?: boolean;
-  }) {
+  async createVisitor(
+    createVisitorDto: {
+      organization_id: string;
+      name: string;
+      mobile: string;
+      active?: boolean;
+    },
+    passedOrgContext?: any,
+  ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
-    // Verify organization matches user's organization (for normal users)
+    // Phase 11 Step 2: the authoritative organization always comes from the
+    // guard-resolved context. A client-supplied organization_id never grants
+    // authorization and must match the context when present.
+    const targetOrganizationId = orgContext.isSuperAdmin
+      ? orgContext.targetOrganizationId
+      : orgContext.organization_id;
+    if (!targetOrganizationId) {
+      throw new ForbiddenException('Organization context is required');
+    }
     if (
-      !orgContext.isSuperAdmin &&
-      orgContext.organization_id &&
-      createVisitorDto.organization_id !== orgContext.organization_id
+      createVisitorDto.organization_id &&
+      createVisitorDto.organization_id !== targetOrganizationId
     ) {
       throw new ForbiddenException(
         'You can only create visitors in your organization',
@@ -54,8 +66,8 @@ export class VisitorService {
     }
 
     const visitor = this.dataSource.getRepository(Visitor).create({
-      id: '00000000-0000-0000-0000-000000000000',
-      organization_id: createVisitorDto.organization_id,
+      id: randomUUID(),
+      organization_id: targetOrganizationId,
       name: createVisitorDto.name,
       mobile: createVisitorDto.mobile,
       active: createVisitorDto.active !== false,
@@ -77,30 +89,33 @@ export class VisitorService {
     return visitor;
   }
 
-  async findAll() {
+  async findAll(passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
+    const organizationId = orgContext.isSuperAdmin
+      ? orgContext.targetOrganizationId
+      : orgContext.organization_id;
+    if (!organizationId) {
+      throw new ForbiddenException('Organization context is required');
+    }
     const query = this.dataSource
       .getRepository(Visitor)
       .createQueryBuilder('visitor');
-
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
-      query.where('visitor.organization_id = :orgId', {
-        orgId: orgContext.organization_id,
-      });
-    }
+    query.where('visitor.organization_id = :orgId', { orgId: organizationId });
 
     return query.getMany();
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const visitor = await this.dataSource.getRepository(Visitor).findOneBy({
       id,
@@ -123,11 +138,13 @@ export class VisitorService {
       mobile?: string;
       active?: boolean;
     },
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const visitor = await this.dataSource.getRepository(Visitor).findOneBy({
       id,
@@ -176,11 +193,12 @@ export class VisitorService {
     return visitor;
   }
 
-  async remove(id: string) {
+  async remove(id: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const visitor = await this.dataSource.getRepository(Visitor).findOneBy({
       id,

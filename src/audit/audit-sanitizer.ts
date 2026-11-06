@@ -30,12 +30,15 @@ const ALWAYS_DENIED_KEY_PATTERNS: RegExp[] = [
   /otp/i,
   /refresh_?token/i,
   /refreshtokenid/i,
+  /access_?token/i,
   /^token$/i,
   /push_?token/i,
   /fcm_?token/i,
   /^mobilenumber$/i,
   /password/i,
   /secret/i,
+  /private_?key/i,
+  /authorization/i,
 ];
 
 function isDeniedKey(

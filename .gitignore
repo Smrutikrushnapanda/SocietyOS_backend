@@ -27,4 +27,9 @@ uploads/
 .idea/
 .vscode/
 *.tsbuildinfo
-.env
+
+# Test files
+*.spec.ts
+
+# TypeORM migrations
+src/database/migrations/

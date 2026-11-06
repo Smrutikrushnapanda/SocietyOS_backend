@@ -1,9 +1,10 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import type { LateChargePolicy } from '../../maintenance/late-charge.policy';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Flat } from './flat.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
 
-@Entity()
+@Entity('maintenance_dues')
 export class MaintenanceDue {
   @PrimaryColumn('uuid')
   id: string;
@@ -47,6 +48,9 @@ export class MaintenanceDue {
   @Column({ type: 'text', nullable: true })
   late_charge_waiver_reason: string | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  late_charge_policy: LateChargePolicy | null;
+
   @Column({ length: 20, default: 'PENDING' })
   status: 'PENDING' | 'OVERDUE' | 'PAID';
 
@@ -54,23 +58,28 @@ export class MaintenanceDue {
   payment_received_at: Date | null;
 
   @Column({
+    name: 'created_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   createdAt: Date;
 
   @Column({
+    name: 'updated_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   updatedAt: Date;
 
   @ManyToOne(() => Flat, (flat) => flat.id)
+  @JoinColumn({ name: 'flat_id' })
   flat: Flat;
 
   @ManyToOne(() => Organization, (org) => org.userRoles)
+  @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 
   @ManyToOne(() => User, (user) => user.userRoles)
+  @JoinColumn({ name: 'late_charge_waived_by' })
   waivedByUser: User | null;
 }

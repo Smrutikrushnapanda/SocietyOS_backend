@@ -8,6 +8,7 @@ export enum PushTokenPlatform {
 
 @Entity('push_tokens')
 @Unique(['user_id', 'token'])
+@Index('UQ_push_tokens_token', ['token'], { unique: true })
 export class PushToken {
   @PrimaryColumn('uuid')
   id: string;

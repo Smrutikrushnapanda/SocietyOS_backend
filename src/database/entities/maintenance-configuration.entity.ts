@@ -1,7 +1,7 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Organization } from './organization.entity';
 
-@Entity()
+@Entity('maintenance_configurations')
 export class MaintenanceConfiguration {
   @PrimaryColumn('uuid')
   id: string;
@@ -24,21 +24,30 @@ export class MaintenanceConfiguration {
   @Column({ type: 'integer', default: 0 })
   late_charge_grace_days: number;
 
+  @Column({ type: 'varchar', length: 10, default: 'ONCE' })
+  late_charge_frequency: 'ONCE' | 'DAILY' | 'WEEKLY';
+
+  @Column({ type: 'varchar', length: 20, default: 'FIRST_DAY' })
+  late_charge_start: 'FIRST_DAY' | 'AFTER_PERIOD';
+
   @Column({ default: true })
   is_active: boolean;
 
   @Column({
+    name: 'created_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   createdAt: Date;
 
   @Column({
+    name: 'updated_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   updatedAt: Date;
 
   @ManyToOne(() => Organization, (org) => org.userRoles)
+  @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 }

@@ -1,9 +1,10 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, OneToMany } from 'typeorm';
+import { Entity, Check, PrimaryColumn, Column, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
 import { PollOption } from './poll-option.entity';
 
-@Entity()
+@Entity('poll')
+@Check('poll_type_valid', "poll_type IN ('SINGLE', 'MULTIPLE')")
 export class Poll {
   @PrimaryColumn('uuid')
   id: string;
@@ -19,6 +20,9 @@ export class Poll {
 
   @Column({ length: 20, default: 'DRAFT' })
   status: string;
+
+  @Column({ length: 10, default: 'SINGLE' })
+  poll_type: 'SINGLE' | 'MULTIPLE';
 
   @Column({ type: 'timestamp' })
   starts_at: Date;
@@ -42,9 +46,11 @@ export class Poll {
   updated_at: Date;
 
   @ManyToOne(() => Organization)
+  @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 
   @ManyToOne(() => User)
+  @JoinColumn({ name: 'created_by' })
   createdByUser: User;
 
   @OneToMany(() => PollOption, (option) => option.poll)

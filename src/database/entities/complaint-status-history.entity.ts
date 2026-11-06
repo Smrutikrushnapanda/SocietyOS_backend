@@ -1,8 +1,8 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Complaint } from './complaint.entity';
 import { User } from './user.entity';
 
-@Entity()
+@Entity('complaint_status_history')
 export class ComplaintStatusHistory {
   @PrimaryColumn('uuid')
   id: string;
@@ -25,12 +25,14 @@ export class ComplaintStatusHistory {
   })
   changed_at: Date;
 
-  @Column('text')
+  @Column({ type: 'text', nullable: true })
   reason: string | null;
 
   @ManyToOne(() => Complaint)
+  @JoinColumn({ name: 'complaint_id' })
   complaint: Complaint;
 
   @ManyToOne(() => User)
+  @JoinColumn({ name: 'changed_by' })
   changedByUser: User;
 }

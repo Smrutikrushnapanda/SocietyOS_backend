@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsOptional, IsDate } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsDateString, IsBoolean } from 'class-validator';
 import { VisitorStatus } from '../enum/visitor-status.enum';
 
 export class UpdateVisitorVisitDto {
@@ -10,9 +10,13 @@ export class UpdateVisitorVisitDto {
   @IsOptional()
   visit_purpose?: string;
 
-  @IsDate()
+  @IsDateString()
   @IsOptional()
-  expected_entry_time?: Date;
+  expected_entry_time?: string | Date;
+
+  @IsBoolean()
+  @IsOptional()
+  check_in?: boolean;
 
   @IsString()
   @IsOptional()

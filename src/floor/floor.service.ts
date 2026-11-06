@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Floor } from '../database/entities/floor.entity';
 import { OrganizationContextService } from '../organization/organization-context.service';
 import { Request } from 'express';
@@ -37,12 +38,15 @@ export class FloorService {
     void recordAudit(this.auditService as any, { ...ctx, action, entity_type: entityType, entity_id: entityId, old_values: oldValues, new_values: newValues, ...meta } as never);
   }
 
-  async create(createFloorDto: {
-    organization_id: string;
-    building_id: string;
-    floor_number: number;
-    name?: string;
-  }) {
+  async create(
+    createFloorDto: {
+      organization_id: string;
+      building_id: string;
+      floor_number: number;
+      name?: string;
+    },
+    passedOrgContext?: any,
+  ) {
     // Verify building exists and belongs to the same organization
     const building = await this.dataSource.getRepository('Building').findOneBy({
       id: createFloorDto.building_id,
@@ -54,9 +58,10 @@ export class FloorService {
     }
 
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     if (!orgContext.isSuperAdmin && orgContext.organization_id) {
       if (building.organization_id !== orgContext.organization_id) {
@@ -79,7 +84,7 @@ export class FloorService {
     }
 
     const floor = this.dataSource.getRepository(Floor).create({
-      id: '00000000-0000-0000-0000-000000000000',
+      id: randomUUID(),
       organization_id: createFloorDto.organization_id,
       building_id: createFloorDto.building_id,
       floor_number: createFloorDto.floor_number,
@@ -103,19 +108,25 @@ export class FloorService {
     return floor;
   }
 
-  async findAll() {
+  async findAll(passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const query = this.dataSource
       .getRepository(Floor)
       .createQueryBuilder('floor');
 
-    if (!orgContext.isSuperAdmin && orgContext.organization_id) {
+    const organizationId =
+      orgContext.targetOrganizationId ??
+      orgContext.organizationId ??
+      orgContext.organization_id;
+
+    if (organizationId) {
       query.where('floor.organization_id = :orgId', {
-        orgId: orgContext.organization_id,
+        orgId: organizationId,
       });
     } else {
       query.where('1 = 0');
@@ -124,11 +135,12 @@ export class FloorService {
     return query.getMany();
   }
 
-  async findAllByBuilding(buildingId: string) {
+  async findAllByBuilding(buildingId: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const query = this.dataSource
       .getRepository(Floor)
@@ -144,11 +156,12 @@ export class FloorService {
     return query.getMany();
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, passedOrgContext?: any) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const floor = await this.dataSource.getRepository(Floor).findOneBy({
       id,
@@ -171,11 +184,13 @@ export class FloorService {
       name?: string;
       isActive?: boolean;
     },
+    passedOrgContext?: any,
   ) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const floor = await this.dataSource.getRepository(Floor).findOneBy({
       id,
@@ -215,11 +230,12 @@ export class FloorService {
     return floor;
   }
 
-  async remove(id: string) {
+  async remove(id: string, passedOrgContext?: any, permanent?: boolean) {
     const orgContext =
-      (await this.organizationContextService.getCurrentOrganization(
-        {} as any,
-      )) as any;
+      (passedOrgContext ??
+        (await this.organizationContextService.getCurrentOrganization(
+          {} as any,
+        ))) as any;
 
     const floor = await this.dataSource.getRepository(Floor).findOneBy({
       id,
@@ -233,9 +249,23 @@ export class FloorService {
       throw new ForbiddenException('Floor not found or access denied');
     }
 
+    // Inspect linked units (flats) on this floor
+    const flatRepo = this.dataSource.getRepository('Flat');
+    const flatCount = await flatRepo.countBy({ floor_id: id });
+    if (flatCount > 0) {
+      throw new ForbiddenException(
+        `Cannot delete floor "${floor.name || floor.floor_number}". It contains ${flatCount} flats/units. Remove or reassign flats first.`,
+      );
+    }
+
     const oldFloorDeleteValues = toSnapshot(floor);
-    floor.isActive = false;
-    await this.dataSource.getRepository(Floor).save(floor);
+    if (permanent) {
+      await this.dataSource.getRepository(Floor).delete({ id });
+    } else {
+      floor.isActive = false;
+      await this.dataSource.getRepository(Floor).save(floor);
+    }
+
     await recordAudit(this.auditService as any, {
       ...resolveAuditContext({
         orgContext,
@@ -248,6 +278,6 @@ export class FloorService {
       new_values: null,
       ...extractRequestMeta(undefined),
     } as never);
-    return floor;
+    return { ...floor, isActive: false, permanent: !!permanent };
   }
 }

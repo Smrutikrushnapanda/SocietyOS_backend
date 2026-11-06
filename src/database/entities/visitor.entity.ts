@@ -1,8 +1,8 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Organization } from './organization.entity';
 import { VisitorVisit } from './visitor-visit.entity';
 
-@Entity()
+@Entity('visitors')
 export class Visitor {
   @PrimaryColumn('uuid')
   id: string;
@@ -20,17 +20,20 @@ export class Visitor {
   active: boolean;
 
   @Column({
+    name: 'created_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   createdAt: Date;
 
   @Column({
+    name: 'updated_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   updatedAt: Date;
 
   @ManyToOne(() => Organization, (org) => org.userRoles)
+  @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 }

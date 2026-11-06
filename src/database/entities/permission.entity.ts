@@ -1,7 +1,7 @@
 import { Entity, PrimaryColumn, Column, ManyToOne, OneToMany } from 'typeorm';
 import { RolePermission } from './role-permission.entity';
 
-@Entity()
+@Entity('permissions')
 export class Permission {
   @PrimaryColumn('uuid')
   id: string;
@@ -12,16 +12,18 @@ export class Permission {
   @Column({ length: 255, nullable: true })
   description: string;
 
-  @Column({ default: true })
+  @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
   @Column({
+    name: 'created_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })
   createdAt: Date;
 
   @Column({
+    name: 'updated_at',
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
   })

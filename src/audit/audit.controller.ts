@@ -42,12 +42,12 @@ export class AuditController {
   @RequireOrganizationId()
   async findAll(
     @Request() req: any,
-    @Query() query: Record<string, unknown>,
+    @Query() query: AuditLogFilters,
   ) {
     const organizationId = this.resolveOrganizationId(req);
     return this.auditService.findAll(
       organizationId,
-      (query ?? {}) as AuditLogFilters,
+      query ?? new AuditLogFilters(),
     );
   }
 

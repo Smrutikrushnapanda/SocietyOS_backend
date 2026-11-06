@@ -1,10 +1,8 @@
 import { Module } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { initializeDataSource } from './data-source';
-import { AuthModule } from '../auth/auth.module';
-
 @Module({
-  imports: [AuthModule],
+  imports: [],
   providers: [
     {
       provide: DataSource,

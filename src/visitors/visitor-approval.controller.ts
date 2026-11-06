@@ -8,16 +8,34 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
-  BadRequestException,
+  UseGuards,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiResponse } from '@nestjs/swagger';
 import { VisitorApprovalService } from './visitor-approval.service';
 import { VisitorApproval } from '../database/entities/visitor-approval.entity';
 import { CreateVisitorApprovalDto } from './dto/create-visitor-approval.dto';
 import { UpdateVisitorApprovalDto } from './dto/update-visitor-approval.dto';
+import { AuthGuard } from '../auth/guards/auth.guard';
+import { OrganizationGuard } from '../organization/organization.guard';
+import { PermissionGuard } from '../authorization/permission.guard';
+import {
+  RequirePermission,
+  RequireOrganizationId,
+} from '../authorization/require-permission.decorator';
 
+/**
+ * Phase 11 Step 2: visitor-approval endpoints are authenticated,
+ * permission-checked (visitor:read / visitor:manage) and organization-scoped
+ * via req.orgContext.
+ *
+ * NOTE: visitor:read / visitor:manage are not present in the seeded
+ * role_permissions data (no migration seeds them). Until they are seeded,
+ * these endpoints are fail-closed for every role.
+ */
 @Controller('visitor-approvals')
 @ApiTags('visitor-approvals')
+@UseGuards(AuthGuard, OrganizationGuard, PermissionGuard)
 export class VisitorApprovalController {
   constructor(
     private readonly visitorApprovalService: VisitorApprovalService,
@@ -26,47 +44,64 @@ export class VisitorApprovalController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiResponse({ status: HttpStatus.CREATED, type: VisitorApproval })
+  @RequirePermission('visitor:manage')
+  @RequireOrganizationId()
   async createVisitorApproval(
-    @Body()
-    createVisitorApprovalDto: CreateVisitorApprovalDto,
+    @Request() req: any,
+    @Body() createVisitorApprovalDto: CreateVisitorApprovalDto,
   ) {
-    return this.visitorApprovalService.createVisitorApproval({
-      organization_id: createVisitorApprovalDto.organization_id,
-      visitor_visit_id: createVisitorApprovalDto.visitor_visit_id,
-      approval_status: createVisitorApprovalDto.approval_status,
-      approver_id: createVisitorApprovalDto.approver_id,
-      approved_at: createVisitorApprovalDto.approved_at,
-      rejected_at: createVisitorApprovalDto.rejected_at,
-    });
+    return this.visitorApprovalService.createVisitorApproval(
+      {
+        organization_id: req.orgContext.organizationId,
+        visitor_visit_id: createVisitorApprovalDto.visitor_visit_id,
+        approval_status: createVisitorApprovalDto.approval_status,
+        approver_id: createVisitorApprovalDto.approver_id,
+        approved_at: createVisitorApprovalDto.approved_at,
+        rejected_at: createVisitorApprovalDto.rejected_at,
+      },
+      req.orgContext,
+    );
   }
 
   @Get()
   @ApiResponse({ status: HttpStatus.OK, type: [VisitorApproval] })
-  async findAllVisitorApprovals() {
-    return this.visitorApprovalService.findAll();
+  @RequirePermission('visitor:read')
+  @RequireOrganizationId()
+  async findAllVisitorApprovals(@Request() req: any) {
+    return this.visitorApprovalService.findAll(req.orgContext);
   }
 
   @Get(':id')
   @ApiResponse({ status: HttpStatus.OK, type: VisitorApproval })
-  async findVisitorApproval(@Param('id') id: string) {
-    return this.visitorApprovalService.findOne(id);
+  @RequirePermission('visitor:read')
+  @RequireOrganizationId()
+  async findVisitorApproval(@Request() req: any, @Param('id') id: string) {
+    return this.visitorApprovalService.findOne(id, req.orgContext);
   }
 
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
   @ApiResponse({ status: HttpStatus.OK, type: VisitorApproval })
+  @RequirePermission('visitor:manage')
+  @RequireOrganizationId()
   async updateVisitorApproval(
+    @Request() req: any,
     @Param('id') id: string,
-    @Body()
-    updateVisitorApprovalDto: UpdateVisitorApprovalDto,
+    @Body() updateVisitorApprovalDto: UpdateVisitorApprovalDto,
   ) {
-    return this.visitorApprovalService.update(id, updateVisitorApprovalDto);
+    return this.visitorApprovalService.update(
+      id,
+      updateVisitorApprovalDto,
+      req.orgContext,
+    );
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiResponse({ status: HttpStatus.OK, type: VisitorApproval })
-  async removeVisitorApproval(@Param('id') id: string) {
-    return this.visitorApprovalService.remove(id);
+  @RequirePermission('visitor:manage')
+  @RequireOrganizationId()
+  async removeVisitorApproval(@Request() req: any, @Param('id') id: string) {
+    return this.visitorApprovalService.remove(id, req.orgContext);
   }
 }

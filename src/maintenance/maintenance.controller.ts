@@ -1,3 +1,5 @@
+import { ResidentPageDto } from '../common/resident-page';
+import { Query as FeedQuery } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -15,14 +17,20 @@ import { PaymentService } from './payment.service';
 import { UpdateMaintenanceConfigurationDto } from './dto';
 import { GenerateDueDto, WaiveLateChargeDto, CreatePaymentDto } from './dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { OrganizationGuard } from '../organization/organization.guard';
 import { PermissionGuard } from '../authorization/permission.guard';
 import {
   RequirePermission,
   RequireOrganizationId,
 } from '../authorization/require-permission.decorator';
 
+/**
+ * Phase 11 Step 2: OrganizationGuard resolves req.orgContext (fail-closed when
+ * missing) before PermissionGuard enforces the required permission against
+ * the target organization.
+ */
 @Controller('maintenance')
-@UseGuards(AuthGuard, PermissionGuard)
+@UseGuards(AuthGuard, OrganizationGuard, PermissionGuard)
 export class MaintenanceController {
   constructor(
     private readonly configService: MaintenanceConfigurationService,
@@ -31,6 +39,13 @@ export class MaintenanceController {
   ) {}
 
   // GET /maintenance/config - Get org maintenance config
+  @Get('payments/my/page')
+  @RequirePermission('payment:my')
+  @RequireOrganizationId()
+  findMyPage(@Request() req: any, @FeedQuery() query: ResidentPageDto) {
+    return this.paymentService.findMyPage(req.user.id, req.orgContext, query);
+  }
+
   @Get('config')
   @RequirePermission('maintenance:read')
   @RequireOrganizationId()
@@ -48,7 +63,11 @@ export class MaintenanceController {
     @Request() req: any,
     @Body() updateDto: UpdateMaintenanceConfigurationDto,
   ) {
-    return this.configService.update(req.orgContext.organizationId, updateDto);
+    return this.configService.saveForOrganization(
+      req.orgContext.organizationId,
+      updateDto,
+      req.orgContext,
+    );
   }
 
   // POST /maintenance/dues - Generate a new due
@@ -63,6 +82,7 @@ export class MaintenanceController {
       generateDueDto.flat_id,
       generateDueDto.billing_period_start,
       generateDueDto.billing_period_end,
+      req.orgContext,
     );
   }
 
@@ -71,7 +91,15 @@ export class MaintenanceController {
   @RequirePermission('due:read')
   @RequireOrganizationId()
   async getDues(@Request() req: any) {
-    return this.dueService.findAllByOrganization();
+    return this.dueService.findAllByOrganization(req.orgContext);
+  }
+
+  // GET /maintenance/dues/my - Get authenticated resident's dues
+  @Get('dues/my')
+  @RequirePermission('due:my')
+  @RequireOrganizationId()
+  async getMyDues(@Request() req: any) {
+    return this.dueService.findMyDues(req.user.id, req.orgContext);
   }
 
   // GET /maintenance/dues/:id - Get due detail
@@ -107,7 +135,13 @@ export class MaintenanceController {
     @Param('id') dueId: string,
     @Body() waiveDto: WaiveLateChargeDto,
   ) {
-    return this.dueService.waiveLateCharge(dueId, req.user.id, waiveDto.reason);
+    return this.dueService.waiveLateCharge(
+      dueId,
+      req.user.id,
+      waiveDto.reason,
+      req.orgContext,
+      waiveDto.stop_future_charges ?? true,
+    );
   }
 
   // POST /payments - Create payment record
@@ -118,7 +152,14 @@ export class MaintenanceController {
     @Request() req: any,
     @Body() createPaymentDto: CreatePaymentDto,
   ) {
-    return this.paymentService.create(createPaymentDto, req.user.id);
+    return this.paymentService.create(
+      {
+        ...createPaymentDto,
+        organization_id: req.orgContext.organizationId,
+      },
+      req.user.id,
+      req.orgContext,
+    );
   }
 
   // GET /payments - List payments for org
@@ -132,6 +173,14 @@ export class MaintenanceController {
     );
   }
 
+  // GET /payments/my - Get authenticated resident's payments
+  @Get('payments/my')
+  @RequirePermission('payment:my')
+  @RequireOrganizationId()
+  async getMyPayments(@Request() req: any) {
+    return this.paymentService.findMyPayments(req.user.id, req.orgContext);
+  }
+
   // GET /payments/:id - Get payment detail
   @Get('payments/:id')
   @RequirePermission('payment:read')
@@ -140,9 +189,9 @@ export class MaintenanceController {
     return this.paymentService.findOne(paymentId, req.orgContext);
   }
 
-  // GET /payments/resident/:residentId - Get resident's payments
+  // GET /payments/resident/:residentId - Get resident's payments (administrative access only)
   @Get('payments/resident/:residentId')
-  @RequirePermission('payment:read')
+  @RequirePermission('payment:manage')
   @RequireOrganizationId()
   async getPaymentsByResident(
     @Request() req: any,

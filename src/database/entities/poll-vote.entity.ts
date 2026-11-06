@@ -1,8 +1,9 @@
-import { Entity, PrimaryColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, Index, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { PollOption } from './poll-option.entity';
 import { Resident } from './resident.entity';
 
-@Entity()
+@Entity('poll_vote')
+@Index('poll_vote_ballot_option_unique', ['poll_id', 'resident_id', 'option_id'], { unique: true })
 export class PollVote {
   @PrimaryColumn('uuid')
   id: string;
@@ -26,8 +27,10 @@ export class PollVote {
   created_at: Date;
 
   @ManyToOne(() => PollOption)
+  @JoinColumn({ name: 'option_id' })
   option: PollOption;
 
   @ManyToOne(() => Resident)
+  @JoinColumn({ name: 'resident_id' })
   resident: Resident;
 }
