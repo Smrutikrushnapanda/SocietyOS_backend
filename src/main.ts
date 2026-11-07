@@ -130,7 +130,8 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
   }
 
-  await app.listen(process.env.PORT ?? 5050);
+  const port = process.env.PORT ?? 5050;
+  await app.listen(port, '0.0.0.0');
   console.log(`🚀 SocietyOS Backend running on ${await app.getUrl()}`);
   if (enableSwagger) {
     console.log(`📖 Swagger documentation available at /api/docs`);

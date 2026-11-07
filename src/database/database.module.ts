@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { initializeDataSource } from './data-source';
+import { createResilientRedisClient } from '../redis/resilient-redis';
+
 @Module({
   imports: [],
   providers: [
@@ -11,8 +13,7 @@ import { initializeDataSource } from './data-source';
     {
       provide: 'REDIS_CLIENT',
       useFactory: () => {
-        const Redis = require('ioredis');
-        return new Redis(process.env.REDIS_URL);
+        return createResilientRedisClient(process.env.REDIS_URL);
       },
     },
   ],
