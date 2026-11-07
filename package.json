@@ -6,11 +6,11 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "node --max-old-space-size=400 ./node_modules/@nestjs/cli/bin/nest.js build",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\" --fix"
   },
   "dependencies": {
@@ -33,6 +33,11 @@
     "sharp": "^0.35.5",
     "socket.io": "^4.8.4",
     "typeorm": "^1.1.1"
+  },
+  "overrides": {
+    "typeorm": {
+      "ioredis": "$ioredis"
+    }
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
